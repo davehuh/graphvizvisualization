@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>ML Visualization</title>
+<link rel="icon" 
+      type="image/png" 
+      href="favicon.png">
+<!-- Viz.js -->
+<script src="viz.js"></script>
+<script src="full.render.js"></script>
+<!-- Svg-pan-zoom -->
+<script src="svg-pan-zoom.min.js"></script>
+<!-- Table filter -->
+<script src="./tablefilter/tablefilter.js"></script>
+<!-- Jquery -->
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+<script src="https://ajax.googleapis.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.js"></script>
+<!-- Underscore.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/underscore.js/1.9.1/underscore.js"></script>
+<link rel="stylesheet" href="https://ajax.googleapis.com/ajax/libs/jqueryui/1.12.1/themes/smoothness/jquery-ui.css">
+<!-- Bootstrap -->
+<script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.js"></script>
+<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css">
+
+<script>
+var viz;
+var pdTF;
+var ppTF;
+
+//When document ready
+$(document).ready(function(){
+	
+	//Read patient data file then call loadPatientData
+	$.ajax({
+		type: "GET",
+		url: "patients.csv",
+		dataType: "text",
+		success: function(e){ loadPatientData(e)}
+	});	
+	
+	//Call dataGraphTree on first load
+	dataGraphTree();
+	
+	//On window resizing, delete the svg and rerender it, up to every 500ms
+	var throttle = _.throttle(function(){
+			$('#svgObj').remove();
+			dataGraphTree();
+		}, 500);
+	$(window).resize(throttle);
+})
+
+
+
+function loadPatientData(data){
+	//Call parsePatientData method to turn the data into an array
+	var patientsArray = parseCSVdata(data)
+	
+	//Call createTable to turn array into a HTML table
+	var patientDetailsTable = createTable(patientsArray, 'patientDetailsTable');
+	//Load patientDetailsTable into the patientDetails tab
+	$('#patientDetails').append(patientDetailsTable);	
+	
+	//Call createTable to turn array into a HTML table
+	var modalTable = createTable(patientsArray, 'patientPopupTable');
+	$('.modal-body').append(modalTable);
+	
+	//Setup filter table options
+	var filterConfig = {
+		rows_counter: {
+			text: 'Patients: '
+		},
+		status_bar: true,
+		paging: {
+		results_per_page: ['Records: ', [25, 50, 100]]
+		},
+		auto_filter: true,
+		no_results_message: true,
+		alternate_rows: true,
+		btn_reset: true,
+		popup_filters: true,
+		col_0: 'none', //id
+		col_1: 'checklist', //Diagnosis
+		col_4: 'checklist', //Performance stuats
+		col_5: 'multiple', //Pain
+		col_6: 'multiple', //Hemoptysis
+		col_7: 'multiple', //Dyspnea
+		col_8: 'multiple', //Cough
+		col_9 : 'multiple', //Weakness
+		col_10: 'checklist', //TNM
+		col_11: 'multiple', //Type 2 DM
+		col_12: 'multiple', //Myocardial Infarction
+		col_13: 'multiple', //PAD
+		col_14: 'multiple', //Smoking
+		col_15 : 'multiple', //Asthma
+		col_19 : 'multiple', //Predicted
+		col_20 : 'multiple', //Actual
+		col_widths: [
+			'27px', //id
+			'115px',//Diagnosis 
+			'42px', //FVC
+			'48px', //FEV1
+			'98px', //Performance status
+			'45px', //Pain
+			'92px', //Hemoptysis
+			'72px', //Dyspnea
+			'60px', //Cough
+			'82px', //Weakness
+			'88px', //TNM
+			'52px', //Type 2 DM
+			'88px', //Myocardial Infarction
+			'45px', //PAD
+			'73px', //Smoking
+			'66px', //Asthma
+			'47px', //Age
+			'92px', //Confidence survive
+			'92px', //Confidence deceased
+			'77px', //Predicted
+			'77px'  //Actual
+		],
+		col_types: [
+			'number', //id
+			'number', //FVC
+			'number', //FEV1
+			'number', //Age
+			'number', //Confidence survive
+			'number' //Confidence deceased		
+		],
+		extensions: [
+			{name: 'sort'}
+		]
+	}
+	
+	//Initalize table filter for patient details tab
+    pdTF = new TableFilter(document.querySelector('#patientDetailsTable'), filterConfig);
+    pdTF.init();
+	
+	//Initalize table filter for patient popup/modal
+	ppTF = new TableFilter(document.querySelector('#patientPopupTable'), filterConfig);
+	ppTF.btnReset = false;
+	ppTF.init();
+	
+	//Wrap each title in a div to get the filter seperate
+	$('th').contents().filter(function (){
+		return $(this)[0].nodeName=="#text";
+	}).wrap("<div class='tableTitle'></div>" );
+};
+
+//Parses patients text file
+function parseCSVdata(data){
+	var dataLines = data.split("\n");
+	var results = [];
+	for (i=0; i<dataLines.length; i++){
+		var split = dataLines[i].split(',');
+		results.push(split);
+	}
+	return results;
+};
+
+//Converts an array into an HTML table
+function createTable(data, id) {
+    //Table HTML
+	var results = "<table id='" + id + "'>";
+	//Add header row
+	results += "<thead><tr>";
+    for(var j=0; j<data[0].length; j++){
+        results += "<th>"+data[0][j]+"</th>";
+    }
+    results += "</tr></thead>";
+	//Add rest of rows
+    for(var i=1; i<data.length-1; i++) {
+        results += "<tr>";
+        for(var j=0; j<data[i].length; j++){
+            results += "<td>"+data[i][j]+"</td>";
+        }
+        results += "</tr>";
+    }
+	//Close table HTML
+    results += "</table>";
+    return results;
+};
+
+function dataGraphTree(){
+	//Read the DOT tree file then call graphTree
+	$.ajax({
+		type: "GET",
+		url: "wekaDTgraph_PDI.dot",
+		dataType: "text",
+		//Then call graphTree
+		success: function(e){ graphTree(e)}
+	});
+}
+
+function graphTree(data){
+	//Graph the tree
+	viz = new Viz();
+	viz.renderSVGElement(data)
+	.then(function(element) {
+		//SVG options, add to treeGraphSvg div
+		element.id = "svgObj";
+		element.style.width = '100%';
+		var h = window.innerHeight - 58;
+		element.style.height = h;
+		$('#treeGraphLegend').attr('style', 'height:'+ h + 'px');
+		var dropShadow = '' +
+			'<filter id="dropshadow" height="150%" width="150%">' +
+			'<feGaussianBlur in="SourceAlpha" stdDeviation="4"/> <!-- stdDeviation is how much to blur -->'+
+			'<feOffset dx="0" dy="3" result="offsetblur"/> <!-- how much to offset -->'+
+			'<feComponentTransfer>'+
+			'	<feFuncA type="linear" slope="0.75"/> <!-- slope is the opacity of the shadow -->'+
+			'</feComponentTransfer>'+
+			'<feMerge>'+
+				'<feMergeNode/> <!-- this contains the offset blurred image -->'+
+				'<feMergeNode in="SourceGraphic"/> <!-- this contains the element that the filter is applied to -->'+
+			'</feMerge>'+
+			'</filter>';
+		element.insertAdjacentHTML('beforeend', dropShadow);
+		$('#treeGraphSvg').append(element);
+		//Call afterSVGinit
+		afterSVGInit();
+	})
+	//Catch errors
+	.catch(error => {
+		viz = new Viz();
+		console.error(error);
+	});
+};
+
+function afterSVGInit(){
+	//Allow the SVG to pan & zoom
+	panZoomInstance = svgPanZoom('#svgObj', {
+		zoomEnabled: true,
+		controlIconsEnabled: true,
+		fit: true,
+		center: true,
+		zoomScaleSensitivity: 0.5,
+		minZoom: 1
+	});
+	$("#graph0").attr("class", "svg-pan-zoom_viewport");
+	
+	//Move edge text out of their groupings so they don't get drop shadow
+	$('.edge>text').each(function() {
+		var edgeText = $( this ).detach();
+		edgeText.appendTo($('#graph0'));
+	});
+
+	//Remove default onhovers
+	$('#svgObj').find('title').remove();
+	
+	//Listen for click event on SVG
+	var elements = $("#svgObj > .svg-pan-zoom_viewport > #graph0 > *");
+	elements.on("click", onClick);
+	
+	//Listen for mouseover
+	var nodes = $('.node');
+	var edges = $('.edge');
+	nodes.mouseenter(function (e){
+		//When mouse enters a node, get pointed at node, and see if it has a matching full description to display on hover
+		var curNode = e.currentTarget;
+		var fullDesc = [['FVC','Forced vital capacity',' the maximum amount of air a person can expel'],
+			['FEV1','Volume of air exhaled at the end of the first second of forced expiration'],
+			['Pain','Pain before surgery'],
+			['Hemoptysis','Cough blood before surgery'],
+			['Dyspnea','Trouble breathing before surgery'],
+			['Cough','Cough before surgery'],
+			['Weakness','Weakness before surgery'],
+			['TNM','Size of original tumor (OC11 smallest to OC14 largest)'],
+			['Type 2 DM','Diabetes mellitus'],
+			['Myocardial Infarction','Cardiac arrest up to 6 months'],
+			['PAD','Peripheral arterial diseases'],
+			['AGE','Age at surgery']];		
+		nodeText = $('#'+curNode.id + '> text')[0].textContent;
+		for (i=0; i<fullDesc.length; i++){
+			if (fullDesc[i][0]==nodeText){
+				curNode.insertAdjacentHTML('beforeend', '<title>' + fullDesc[i][1] +'</title>');
+			}
+		}
+		//Then get links file and call parseLinks
+		var nodeNum = parseInt(curNode.id.replace('node',''))-1;
+		$.ajax({
+			type: "GET",
+			url: "links.csv",
+			dataType: "text",
+			success: function(e){ parseLinks(e, nodeNum)}
+		});
+		
+	})
+	//When mouse leaves a pointed at object remove the filter and full discription displayed on hover
+	nodes.mouseleave(function (e){
+		nodes.removeAttr('filter');
+		edges.removeAttr('filter');
+		$('svg>title').remove();
+	})
+	
+	$('#ellipseLegend').mouseenter(function (e){
+		$('#svgObj').find('ellipse').attr('filter', 'url(#dropshadow)')
+	})
+	$('#ellipseLegend').mouseleave(function (e){
+		$('#svgObj').find('ellipse').removeAttr('filter');
+	})
+	$('#rectLegend').mouseenter(function (e){
+		$('#svgObj>g>g>g>polygon').attr('filter', 'url(#dropshadow)')
+	})
+	$('#rectLegend').mouseleave(function (e){
+		$('#svgObj>g>g>g>polygon').removeAttr('filter');
+	})
+};
+
+function onClick(e){
+	//When something clicked on SVG
+	var curNode = e.currentTarget.id;
+	//If a node was clicked on
+	if(curNode!=''){
+		//Get the node number
+		var nodeNum = parseInt(curNode.replace('node',''))-1;
+		//Read the output file then call findMatches
+		$.ajax({
+			type: "GET",
+			url: "output.csv",
+			dataType: "text",
+			success: function(e){ findMatches(e, nodeNum)}
+		});
+	}
+};
+
+function findMatches(data, nodeNum){
+	//Parse the output file
+	var outputArray = parseCSVdata(data);
+	//Get the patients that match the node clicked on
+	var patients = searchOutput(outputArray, nodeNum);
+	//If there are patients that match
+	if(patients.length!=0){
+		ppTF.setFilterValue(0, patients.join('||'));
+		ppTF.filter();
+		$(".modal").modal();
+	}
+};
+
+//Searches output text file for patients that are associated with the current node
+function searchOutput(outputArray, nodeNum){
+	var results = [];
+	for (i=0; i<outputArray.length; i++){
+		if(outputArray[i][2]==nodeNum){
+			results.push(outputArray[i][0]);
+		}
+	}
+	return results;
+};
+
+function parseLinks(data, nodeNum){
+	//Parse the links CSV file
+	var links = parseCSVdata(data);
+	//Call recurseLinks for the current node up to the root node
+	recurseLinks(links, nodeNum);
+};
+
+//Recurse down the links file, highlighting each parent node
+function recurseLinks(links, nodeNum){
+	for (i=0; i<links.length; i++){
+		//If the nodeNum is another node's child, highlight current node then call for parent node
+		if (nodeNum == parseInt(links[i][1])) {
+			var nodeName = '#node'+ (nodeNum+1);
+			var edgeName = '#edge' + nodeNum;
+			$(nodeName).attr('filter', 'url(#dropshadow)');
+			$(edgeName).attr('filter', 'url(#dropshadow)');
+			recurseLinks(links, parseInt(links[i][0]));
+		}
+		//If on the root node, highlight the root node and stop
+		else if (nodeNum == 0){
+			var nodeName = '#node'+ (nodeNum+1);
+			var edgeName = '#edge' + nodeNum;
+			$(nodeName).attr('filter', 'url(#dropshadow)');
+			$(edgeName).attr('filter', 'url(#dropshadow)');
+		}
+	}
+};
+</script>
+<style>
+	.modal-dialog{
+		width: 1600px;
+		max-width: 100%;
+	}
+	.modal-content {
+		max-height: 700px;
+	}
+	.modal-body {
+		max-height: 600px;
+		overflow-y: auto;
+	}
+	text {
+		font-family: "Open Sans", Arial;
+		font-size: 12px;
+		color: #333;
+	}
+	.node > ellipse{
+		fill:white
+	}
+	.node > polygon{
+		fill: #d6d6d6;
+	}
+	.flt_multi{
+		overflow: auto;
+	}
+	th, td {
+		padding: .5em .5em !important;
+	}
+	select.flt_multi option{
+		padding: 0 !important;
+	}
+	label{
+		margin: 0px !important;
+	}
+	.div_checklist li.flt_checklist_item{
+		padding: 0 !important;
+		height: 25px;
+	}
+	.div_checklist input{
+		margin: 0px 2px 0 3px !important;
+	}
+	#patientDetailsTable{
+		margin:auto;
+	}
+	#HitachiLogo{
+		height: 50px;
+		width: 105px;
+		padding: 10px 0;
+		margin: 0 5px;
+	}
+	.navbar{
+		margin: 0px;
+		border-style: solid;
+		border-width: 2px 0 0 0;
+		border-color: rgb(204,0,0);
+		border-top-left-radius: 0;
+		border-top-right-radius: 0;
+	}
+	.navbar-nav{
+		float: right;
+		font-size: 13px;
+	}
+	#HitachiName, #PageTitle {
+		margin: 0 5px;
+	}
+	#PageTitle{
+		color: rgb(204,0,0)
+	}
+	body{
+		font-family: "Open Sans", Arial
+	}
+	.titleText{
+		font-weight: bold;
+	}
+	p{
+		margin: 0 0 5px 0
+	}
+	#treeGraphLegend{
+		background: rgb(248,248,248);
+	}
+	.bottomPadding{
+		padding-bottom:10px;
+	}
+	.topPadding{
+		padding-top:5px;
+	}
+	.underline{
+		text-decoration: underline;
+	}
+	.noPadding{
+		padding:0;
+	}
+</style>
+</head>
+
+<body>
+	<div class="container-fluid">
+		<div class="row">
+			<nav class="navbar navbar-default">
+				<div class="container-fluid">
+					<div class="navbar-header">
+						<img src="HitachiLogo.png" id="HitachiLogo"/>
+						<span id="HitachiName" class="titleText">Hitachi Vantara</span>
+						<span id="PageTitle" class="titleText">ML Visualization</span>
+					</div>
+					<ul class="nav navbar-nav">
+						<li class="active titleText"><a data-toggle="tab" href="#treeGraph">Tree Graph</a></li>
+						<li><a class="titleText" data-toggle="tab" href="#patientDetails">Patient Details</a></li>
+					</ul>
+				</div>
+			</nav>
+		</div>
+		<div class="row">
+			<div class="tab-content">
+				<div id="treeGraph" class="tab-pane fade in active">
+					<div class="col-xs-2" id="treeGraphLegend">
+						<div class="topPadding">
+							<p><b>Legend</b></p>
+						</div>
+						<div class="bottomPadding">
+							<p class="underline">Shape of Nodes</p>
+							<p><svg width="100" height="40">
+								<g id="ellipseLegend">
+									<ellipse cx="50" cy="20" rx="49" ry="19" style="fill:white;stroke:black"/>
+									<text x="50" y="20" text-anchor="middle" dominant-baseline="middle">Feature</text>
+								</g>
+							</svg></p>
+							<p><svg width="100" height="40">
+								<g id="rectLegend">
+									<rect width="100" height="40" style="fill:#d6d6d6;stroke:black;stroke-width:2px;" />
+									<text x="50" y="20" text-anchor="middle" dominant-baseline="middle">Classification</text>
+								</g>
+							</svg></p>
+						</div>
+						<div class="bottomPadding">
+							<p class="underline">Classification Descriptions</p>
+							<p><i>Survived</i>: Survived after one year of surgery</p>
+							<p><i>Deceased</i>: Deceased within one year of surgery</p>
+						</div>
+						<div class="bottomPadding">
+							<p class="underline">Classification Numbers</p>
+							<p><i>Survived (7/1)</i></p>
+							<p>7 patients predicted to have survived</p>
+							<p>1 patient was incorrectly predicted	and is deceased</p>
+						</div>
+					</div>
+					<div class="col-xs-10 noPadding" id="treeGraphSvg"></div>
+				</div>
+				<div id="patientDetails" class="tab-pane fade"></div>
+			</div>
+		</div>
+	</div>
+		
+	<!-- Modal / Popup -->
+	<div class="modal fade" role="dialog">
+		<div class="modal-dialog">
+			<div class="modal-content">
+				<div class="modal-header">
+					<button type="button" class="close" data-dismiss="modal">&times;</button>
+					<h4 class="modal-title">Patient Data</h4>
+				</div>
+				<div class="modal-body"></div>
+			</div>
+		</div>
+	</div>
+	
+</body>
+
+</html>
+
